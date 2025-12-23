@@ -1,2 +1,9 @@
-.zig-cache/
-zig-out/
+# --- Rust Essentials ---
+/target/
+/chess/target/
+**/*.rs.bk
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini

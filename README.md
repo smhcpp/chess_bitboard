@@ -11,6 +11,9 @@ We are swapping standard arrays for 64-bit integers to handle board state and mo
 - https://unknuffig.itch.io/2d-chess-pieces
 - https://commons.wikimedia.org/wiki/Category:PNG_chess_pieces/Standard_transparent
 
+# Libraries:
+- https://github.com/ggez/ggez
+
 # Links:
 - Join Our Discord Community: https://discord.gg/BSbMZtNWug
 - GitHub Code: https://github.com/smhcpp/chess_bitboard

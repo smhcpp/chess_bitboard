@@ -3,6 +3,7 @@ use ggez::conf;
 use ggez::event::{self, EventHandler};
 use ggez::graphics::{self, Color};
 use ggez::{Context, ContextBuilder, GameResult};
+// use std::collections::HashMap;
 fn main() {
     let width: f32 = 640.0;
     let height: f32 = 640.0;
@@ -17,33 +18,36 @@ fn main() {
     // Create an instance of your event handler.
     // Usually, you should provide it with the Context object to
     // use when setting your game up.
-    let g = Chess::new(&mut ctx);
+    let g = Chess::new(&mut ctx, width, height);
 
     // Run!
     event::run(ctx, event_loop, g);
 }
 
-struct Piece {
-    bitmask: u64,
-    image: graphics::Image,
-}
-
 struct Chess {
+    mouse_position: [f32; 2],
+    from_square: u64,
+    to_square: u64,
+    width: f32,
+    height: f32,
     bitboards: [u64; 12],
-    pieces: [Piece; 12],
+    images: [graphics::Image; 12],
     square_size: f32,
     texture_size: f32,
     square_mesh: graphics::Mesh,
 }
 
 impl Chess {
+    fn move(&mut self){
+        if self.from_square == 0 && self.to_square == 0 {return}
+    }
     fn draw_board(&mut self, canvas: &mut graphics::Canvas) {
         for i in 0..8 {
             for j in 0..8 {
                 let color = if (i + j) % 2 == 0 {
                     Color::from_rgb(233, 233, 233)
                 } else {
-                    Color::from_rgb(40, 40, 40)
+                    Color::from_rgb(70, 70, 70)
                 };
                 let x = i as f32 * self.square_size;
                 let y = j as f32 * self.square_size;
@@ -54,25 +58,27 @@ impl Chess {
     }
 
     fn draw_pieces(&mut self, canvas: &mut graphics::Canvas) {
+        let original_size = 128.0;
+        let scale = 0.6;
+        let offset = (self.square_size - original_size * scale) / 2.0;
         for i in 0..8 {
             for j in 0..8 {
-                for piece in &self.pieces {
+                for piece_index in 0..self.images.len() {
                     let mask = 1u64 << (j * 8 + i);
-                    if piece.bitmask & mask != 0 {
-                        let x = i as f32 * self.square_size;
-                        let y = j as f32 * self.square_size;
-                        let param = graphics::DrawParam::default().dest([x, y]).scale([
-                            self.texture_size / self.square_size,
-                            self.texture_size / self.square_size,
-                        ]);
-                        canvas.draw(&piece.image, param);
+                    if self.bitboards[piece_index] & mask != 0 {
+                        let x = self.width - (i + 1) as f32 * self.square_size;
+                        let y = self.height - (j + 1) as f32 * self.square_size;
+                        let param = graphics::DrawParam::default()
+                            .dest([x + offset, y + offset])
+                            .scale([scale, scale]);
+                        canvas.draw(&self.images[piece_index], param);
                     }
                 }
             }
         }
     }
 
-    pub fn new(_ctx: &mut Context) -> Chess {
+    pub fn new(_ctx: &mut Context, width: f32, height: f32) -> Chess {
         let square_size: f32 = 80.0;
         let rect = graphics::Rect::new(0.0, 0.0, square_size, square_size);
         let bpawn_image =
@@ -126,55 +132,24 @@ impl Chess {
         let bqueen_bitmask = 1u64 << 60;
         let bking_bitmask = 1u64 << 59;
         Chess {
-            pieces: [
-                Piece {
-                    bitmask: wpawn_bitmask,
-                    image: wpawn_image,
-                },
-                Piece {
-                    bitmask: wknight_bitmask,
-                    image: wknight_image,
-                },
-                Piece {
-                    bitmask: wbishop_bitmask,
-                    image: wbishop_image,
-                },
-                Piece {
-                    bitmask: wrook_bitmask,
-                    image: wrook_image,
-                },
-                Piece {
-                    bitmask: wqueen_bitmask,
-                    image: wqueen_image,
-                },
-                Piece {
-                    bitmask: wking_bitmask,
-                    image: wking_image,
-                },
-                Piece {
-                    bitmask: bpawn_bitmask,
-                    image: bpawn_image,
-                },
-                Piece {
-                    bitmask: bknight_bitmask,
-                    image: bknight_image,
-                },
-                Piece {
-                    bitmask: bbishop_bitmask,
-                    image: bbishop_image,
-                },
-                Piece {
-                    bitmask: brook_bitmask,
-                    image: brook_image,
-                },
-                Piece {
-                    bitmask: bqueen_bitmask,
-                    image: bqueen_image,
-                },
-                Piece {
-                    bitmask: bking_bitmask,
-                    image: bking_image,
-                },
+            mouse_position: [0.0, 0.0],
+            from_square: 0,
+            to_square: 0,
+            width: width,
+            height: height,
+            images: [
+                wpawn_image,
+                wknight_image,
+                wbishop_image,
+                wrook_image,
+                wqueen_image,
+                wking_image,
+                bpawn_image,
+                bknight_image,
+                bbishop_image,
+                brook_image,
+                bqueen_image,
+                bking_image,
             ],
             bitboards: [
                 wpawn_bitmask,
@@ -203,9 +178,58 @@ impl Chess {
     }
 }
 
+pub fn get_square_mask(_x: f32, _y: f32, square_size: f32) -> u64 {
+    let i = (_x / square_size) as u64;
+    let j = (_y / square_size) as u64;
+    let j = 7 - j;
+    let mask = 7; // = 1u64 | 1u64 << 1 | 1u64 << 2
+    let i = i & mask;
+    let j = j & mask;
+    1u64 << i + j * 8
+}
+
 impl EventHandler for Chess {
     fn update(&mut self, _ctx: &mut Context) -> GameResult {
         // Update code here...
+        Ok(())
+    }
+
+    fn mouse_button_down_event(
+        &mut self,
+        _ctx: &mut Context,
+        _button: event::MouseButton,
+        _x: f32,
+        _y: f32,
+    ) -> Result<(), ggez::GameError> {
+        if _button == event::MouseButton::Left {
+            self.from_square = get_square_mask(_x, _y, self.square_size);
+        }
+        Ok(())
+    }
+
+    fn mouse_button_up_event(
+        &mut self,
+        _ctx: &mut Context,
+        _button: event::MouseButton,
+        _x: f32,
+        _y: f32,
+    ) -> Result<(), ggez::GameError> {
+        if _button == event::MouseButton::Left {
+            self.to_square = get_square_mask(_x, _y, self.square_size);
+            self.move();
+        }
+        Ok(())
+    }
+
+    fn mouse_motion_event(
+        &mut self,
+        _ctx: &mut Context,
+        _x: f32,
+        _y: f32,
+        _dx: f32,
+        _dy: f32,
+    ) -> Result<(), ggez::GameError> {
+        self.mouse_position = [_x, _y];
         Ok(())
     }
 

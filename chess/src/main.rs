@@ -2,6 +2,7 @@
 use ggez::conf;
 use ggez::event::{self, EventHandler};
 use ggez::graphics::{self, Color};
+use ggez::winit::window::CursorIcon;
 use ggez::{Context, ContextBuilder, GameResult};
 // use std::collections::HashMap;
 fn main() {
@@ -24,7 +25,15 @@ fn main() {
     event::run(ctx, event_loop, g);
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChessMove {
+    from_square: u64,
+    moves: u64,
+}
+
 struct Chess {
+    possible_moves: Vec<ChessMove>,
+    is_white_turn: bool,
     mouse_position: [f32; 2],
     from_square: u64,
     to_square: u64,
@@ -38,9 +47,79 @@ struct Chess {
 }
 
 impl Chess {
-    fn move(&mut self){
-        if self.from_square == 0 && self.to_square == 0 {return}
+    fn make_move(&mut self) {
+        if self.from_square == 0 || self.to_square == 0 || self.from_square == self.to_square {
+            return;
+        }
+        // if !self.possible_moves.contains(&ChessMove {
+        //     from_square: self.from_square,
+        //     moves: self.to_square,
+        // }) {
+        //     return;
+        // }
+        for i in 0..12 {
+            if self.bitboards[i] & self.to_square != 0 {
+                self.bitboards[i] ^= self.to_square;
+            }
+        }
+        for i in 0..12 {
+            if self.bitboards[i] & self.from_square != 0 {
+                self.bitboards[i] ^= self.from_square;
+                self.bitboards[i] |= self.to_square;
+            }
+        }
+        self.is_white_turn = !self.is_white_turn;
     }
+
+    fn update_possible_moves(&mut self) {
+        self.possible_moves.clear();
+        for piece_index in 0..self.bitboards.len() {
+            let mut temp = self.bitboards[piece_index];
+            while temp != 0 {
+                let one_index = temp.trailing_zeros();
+                match piece_index % 6 {
+                    0 => self.gen_pawn_moves(one_index),
+                    1 => self.gen_knight_moves(one_index),
+                    2 => self.gen_bishop_moves(one_index),
+                    3 => self.gen_rook_moves(one_index),
+                    4 => self.gen_queen_moves(one_index),
+                    5 => self.gen_king_moves(one_index),
+                    _ => {}
+                }
+                temp &= temp - 1;
+            }
+        }
+    }
+
+    fn gen_pawn_moves(&mut self, one_index: u32) {}
+    fn gen_knight_moves(&mut self, one_index: u32) {
+        let location_mask: u64 = 1 << one_index;
+        let mut moves: u64 = 0;
+        let not_a_file: u64 = 0x7f7f7f7f7f7f7f7f;
+        let not_b_file: u64 = 0xbfbfbfbfbfbfbfbf;
+        let not_g_file: u64 = 0xfdfdfdfdfdfdfdfd;
+        let not_h_file: u64 = 0xfefefefefefefefe;
+        let not_ab_file = not_a_file & not_b_file;
+        let not_gh_file = not_g_file & not_h_file;
+        // 6, 10, 15, 17
+        moves |= (location_mask << 6) & not_ab_file;
+        moves |= (location_mask << 10) & not_gh_file;
+        moves |= (location_mask << 15) & not_a_file;
+        moves |= (location_mask << 17) & not_h_file;
+        moves |= (location_mask >> 6) & not_gh_file;
+        moves |= (location_mask >> 10) & not_ab_file;
+        moves |= (location_mask >> 15) & not_a_file;
+        moves |= (location_mask >> 17) & not_h_file;
+        self.possible_moves.push(ChessMove {
+            from_square: location_mask,
+            moves: moves,
+        });
+    }
+    fn gen_bishop_moves(&mut self, one_index: u32) {}
+    fn gen_rook_moves(&mut self, one_index: u32) {}
+    fn gen_queen_moves(&mut self, one_index: u32) {}
+    fn gen_king_moves(&mut self, one_index: u32) {}
+
     fn draw_board(&mut self, canvas: &mut graphics::Canvas) {
         for i in 0..8 {
             for j in 0..8 {
@@ -61,19 +140,23 @@ impl Chess {
         let original_size = 128.0;
         let scale = 0.6;
         let offset = (self.square_size - original_size * scale) / 2.0;
-        for i in 0..8 {
-            for j in 0..8 {
-                for piece_index in 0..self.images.len() {
-                    let mask = 1u64 << (j * 8 + i);
-                    if self.bitboards[piece_index] & mask != 0 {
-                        let x = self.width - (i + 1) as f32 * self.square_size;
-                        let y = self.height - (j + 1) as f32 * self.square_size;
-                        let param = graphics::DrawParam::default()
-                            .dest([x + offset, y + offset])
-                            .scale([scale, scale]);
-                        canvas.draw(&self.images[piece_index], param);
-                    }
+        for piece_index in 0..self.images.len() {
+            let mut temp = self.bitboards[piece_index];
+            while temp != 0 {
+                let one_index = temp.trailing_zeros();
+                let i = one_index % 8;
+                let j = one_index / 8;
+                let mut x = self.width - (i + 1) as f32 * self.square_size;
+                let mut y = self.height - (j + 1) as f32 * self.square_size;
+                if one_index == self.from_square.trailing_zeros() {
+                    x = self.mouse_position[0] - self.square_size / 2.0;
+                    y = self.mouse_position[1] - self.square_size / 2.0;
                 }
+                let param = graphics::DrawParam::default()
+                    .dest([x + offset, y + offset])
+                    .scale([scale, scale]);
+                canvas.draw(&self.images[piece_index], param);
+                temp &= temp - 1;
             }
         }
     }
@@ -132,6 +215,8 @@ impl Chess {
         let bqueen_bitmask = 1u64 << 60;
         let bking_bitmask = 1u64 << 59;
         Chess {
+            possible_moves: Vec::new(),
+            is_white_turn: true,
             mouse_position: [0.0, 0.0],
             from_square: 0,
             to_square: 0,
@@ -181,10 +266,12 @@ impl Chess {
 pub fn get_square_mask(_x: f32, _y: f32, square_size: f32) -> u64 {
     let i = (_x / square_size) as u64;
     let j = (_y / square_size) as u64;
+    if i > 7 || j > 7 {
+        return 0;
+    }
     let j = 7 - j;
-    let mask = 7; // = 1u64 | 1u64 << 1 | 1u64 << 2
-    let i = i & mask;
-    let j = j & mask;
+    let i = 7 - i;
+    println!("i: {}, j: {}, mask: {}", i, j, i + j * 8);
     1u64 << i + j * 8
 }
 
@@ -216,8 +303,11 @@ impl EventHandler for Chess {
     ) -> Result<(), ggez::GameError> {
         if _button == event::MouseButton::Left {
             self.to_square = get_square_mask(_x, _y, self.square_size);
-            self.move();
+            self.make_move();
+            _ctx.gfx.window().set_cursor_icon(CursorIcon::Default);
         }
+        self.from_square = 0;
+        self.to_square = 0;
         Ok(())
     }
 
@@ -230,6 +320,9 @@ impl EventHandler for Chess {
         _dy: f32,
     ) -> Result<(), ggez::GameError> {
         self.mouse_position = [_x, _y];
+        if self.from_square != 0 {
+            _ctx.gfx.window().set_cursor_icon(CursorIcon::Grab);
+        }
         Ok(())
     }
 

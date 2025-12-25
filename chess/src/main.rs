@@ -51,12 +51,12 @@ impl Chess {
         if self.from_square == 0 || self.to_square == 0 || self.from_square == self.to_square {
             return;
         }
-        // if !self.possible_moves.contains(&ChessMove {
-        //     from_square: self.from_square,
-        //     moves: self.to_square,
-        // }) {
-        //     return;
-        // }
+        if !self.is_move_possible(ChessMove {
+            from_square: self.from_square,
+            moves: self.to_square,
+        }) {
+            return;
+        }
         for i in 0..12 {
             if self.bitboards[i] & self.to_square != 0 {
                 self.bitboards[i] ^= self.to_square;
@@ -69,6 +69,16 @@ impl Chess {
             }
         }
         self.is_white_turn = !self.is_white_turn;
+        self.update_possible_moves();
+    }
+
+    fn is_move_possible(&self, mv: ChessMove) -> bool {
+        for possible_move in &self.possible_moves {
+            if possible_move.from_square == mv.from_square && possible_move.moves & mv.moves != 0 {
+                return true;
+            }
+        }
+        false
     }
 
     fn update_possible_moves(&mut self) {
@@ -78,7 +88,7 @@ impl Chess {
             while temp != 0 {
                 let one_index = temp.trailing_zeros();
                 match piece_index % 6 {
-                    0 => self.gen_pawn_moves(one_index),
+                    0 => self.gen_pawn_moves(piece_index, one_index),
                     1 => self.gen_knight_moves(one_index),
                     2 => self.gen_bishop_moves(one_index),
                     3 => self.gen_rook_moves(one_index),
@@ -91,7 +101,73 @@ impl Chess {
         }
     }
 
-    fn gen_pawn_moves(&mut self, one_index: u32) {}
+    fn gen_pawn_moves(&mut self, piece_index: usize, one_index: u32) {
+        let location_mask: u64 = 1 << one_index;
+        let is_white = piece_index < 6;
+        let mut moves: u64 = 0;
+        let mut is_double_possible =
+            (one_index / 8 == 1 && is_white) || (one_index / 8 == 6 && !is_white);
+        let mut is_one_possible = true;
+        let mut is_taking_possible_r = false;
+        let mut is_taking_possible_l = false;
+        let to_square = if is_white {
+            location_mask << 8
+        } else {
+            location_mask >> 8
+        };
+        let to_square2 = if is_white {
+            location_mask << 16
+        } else {
+            location_mask >> 16
+        };
+        let taking_to_square_r = if is_white {
+            location_mask << 7
+        } else {
+            location_mask >> 9
+        };
+        let taking_to_square_l = if is_white {
+            location_mask << 9
+        } else {
+            location_mask >> 7
+        };
+        for p_index in 0..12 {
+            let is_enemy = (p_index < 6) != is_white;
+            if self.bitboards[p_index] & to_square != 0 {
+                is_one_possible = false;
+                is_double_possible = false;
+            }
+            if self.bitboards[p_index] & to_square2 != 0 {
+                is_double_possible = false;
+            }
+            if (self.bitboards[p_index] & taking_to_square_r != 0) && is_enemy {
+                is_taking_possible_r = true;
+            }
+            if (self.bitboards[p_index] & taking_to_square_l != 0) && is_enemy {
+                is_taking_possible_l = true;
+            }
+        }
+        if is_one_possible {
+            moves |= to_square;
+        }
+        if is_double_possible {
+            moves |= to_square2;
+        }
+        if is_taking_possible_r {
+            moves |= taking_to_square_r;
+        }
+        if is_taking_possible_l {
+            moves |= taking_to_square_l;
+        }
+        if moves == 0 {
+            return;
+        }
+        // ADD ENPASSANT
+        self.possible_moves.push(ChessMove {
+            from_square: location_mask,
+            moves: moves,
+        });
+    }
+
     fn gen_knight_moves(&mut self, one_index: u32) {
         let location_mask: u64 = 1 << one_index;
         let mut moves: u64 = 0;
@@ -101,7 +177,6 @@ impl Chess {
         let not_h_file: u64 = 0xfefefefefefefefe;
         let not_ab_file = not_a_file & not_b_file;
         let not_gh_file = not_g_file & not_h_file;
-        // 6, 10, 15, 17
         moves |= (location_mask << 6) & not_ab_file;
         moves |= (location_mask << 10) & not_gh_file;
         moves |= (location_mask << 15) & not_a_file;
@@ -110,6 +185,9 @@ impl Chess {
         moves |= (location_mask >> 10) & not_ab_file;
         moves |= (location_mask >> 15) & not_a_file;
         moves |= (location_mask >> 17) & not_h_file;
+        if moves == 0 {
+            return;
+        }
         self.possible_moves.push(ChessMove {
             from_square: location_mask,
             moves: moves,
@@ -140,17 +218,23 @@ impl Chess {
         let original_size = 128.0;
         let scale = 0.6;
         let offset = (self.square_size - original_size * scale) / 2.0;
+        let mut moving_piece_index: Option<usize> = None;
+        let mut moving_piece_x: f32 = 0.0;
+        let mut moving_piece_y: f32 = 0.0;
         for piece_index in 0..self.images.len() {
             let mut temp = self.bitboards[piece_index];
             while temp != 0 {
                 let one_index = temp.trailing_zeros();
                 let i = one_index % 8;
                 let j = one_index / 8;
-                let mut x = self.width - (i + 1) as f32 * self.square_size;
-                let mut y = self.height - (j + 1) as f32 * self.square_size;
+                let x = self.width - (i + 1) as f32 * self.square_size;
+                let y = self.height - (j + 1) as f32 * self.square_size;
                 if one_index == self.from_square.trailing_zeros() {
-                    x = self.mouse_position[0] - self.square_size / 2.0;
-                    y = self.mouse_position[1] - self.square_size / 2.0;
+                    moving_piece_index = Some(piece_index);
+                    moving_piece_x = self.mouse_position[0] - self.square_size / 2.0;
+                    moving_piece_y = self.mouse_position[1] - self.square_size / 2.0;
+                    temp &= temp - 1;
+                    continue;
                 }
                 let param = graphics::DrawParam::default()
                     .dest([x + offset, y + offset])
@@ -158,6 +242,12 @@ impl Chess {
                 canvas.draw(&self.images[piece_index], param);
                 temp &= temp - 1;
             }
+        }
+        if let Some(piece_index) = moving_piece_index {
+            let param = graphics::DrawParam::default()
+                .dest([moving_piece_x, moving_piece_y])
+                .scale([scale, scale]);
+            canvas.draw(&self.images[piece_index], param);
         }
     }
 
@@ -214,7 +304,7 @@ impl Chess {
         let brook_bitmask = 1u64 << 56 | 1u64 << 63;
         let bqueen_bitmask = 1u64 << 60;
         let bking_bitmask = 1u64 << 59;
-        Chess {
+        let mut chess = Chess {
             possible_moves: Vec::new(),
             is_white_turn: true,
             mouse_position: [0.0, 0.0],
@@ -259,7 +349,9 @@ impl Chess {
                 Color::WHITE,
             )
             .expect("Could not make the rectangle"),
-        }
+        };
+        chess.update_possible_moves();
+        return chess;
     }
 }
 
@@ -271,7 +363,6 @@ pub fn get_square_mask(_x: f32, _y: f32, square_size: f32) -> u64 {
     }
     let j = 7 - j;
     let i = 7 - i;
-    println!("i: {}, j: {}, mask: {}", i, j, i + j * 8);
     1u64 << i + j * 8
 }
 

@@ -4,7 +4,7 @@ use ggez::event::{self, EventHandler};
 use ggez::graphics::{self, Color};
 use ggez::winit::window::CursorIcon;
 use ggez::{Context, ContextBuilder, GameResult};
-// use std::collections::HashMap;
+use std::collections::HashMap;
 fn main() {
     let width: f32 = 640.0;
     let height: f32 = 640.0;
@@ -20,9 +20,36 @@ fn main() {
     // Usually, you should provide it with the Context object to
     // use when setting your game up.
     let g = Chess::new(&mut ctx, width, height);
-
+    // Inside main() or after precompute:
+    // Check paths starting from Square 0 (A1)
+    // println!("--- Debugging Rook Paths from A1 (0) ---");
+    // let start_node = 0;
+    // if let Some(map) = g.rook_paths.get(start_node) {
+    //     for (target, path_mask) in map {
+    //         let title = format!("Path A1 -> Square {}", target);
+    //         print_bitboard(*path_mask, &title);
+    //     }
+    // }
     // Run!
     event::run(ctx, event_loop, g);
+}
+
+fn print_bitboard(bitboard: u64, name: &str) {
+    println!("=== {} ({}) ===", name, bitboard);
+    for rank in (0..8).rev() {
+        // Print rank 7 (top) down to 0
+        for file in 0..8 {
+            let square_index = rank * 8 + file;
+            let mask = 1u64 << square_index;
+            if (bitboard & mask) != 0 {
+                print!(" X "); // Bit is set
+            } else {
+                print!(" . "); // Empty
+            }
+        }
+        println!(); // New line for next rank
+    }
+    println!();
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,7 +59,7 @@ pub struct ChessMove {
 }
 
 struct Chess {
-    // possible_moves: Vec<ChessMove>,
+    rook_paths: [HashMap<u64, u64>; 64],
     possible_moves: [u64; 12],
     occupancy: [u64; 2],
     is_white_turn: bool,
@@ -122,10 +149,6 @@ impl Chess {
             | double_move[side_index]
             | take_right[side_index]
             | take_left[side_index];
-        println!(
-            "Side: {}, Moves: {}, mv.to_square: {}, mv.from_square: {}",
-            side_index, moves, mv.to_square, mv.from_square
-        );
         return moves & mv.to_square & !self.occupancy[side_index] != 0;
     }
 
@@ -139,18 +162,34 @@ impl Chess {
             | ((mv.from_square >> 10) & Self::NOT_AB_FILE)
             | ((mv.from_square >> 15) & Self::NOT_A_FILE)
             | ((mv.from_square >> 17) & Self::NOT_H_FILE);
-        println!(
-            "Side: {}, Moves: {}, mv.to_square: {}, mv.from_square: {}",
-            side_index, moves, mv.to_square, mv.from_square
-        );
         return moves & mv.to_square & !self.occupancy[side_index] != 0;
     }
     fn is_bishop_move_possible(&self, mv: ChessMove) -> bool {
         false
     }
+
     fn is_rook_move_possible(&self, mv: ChessMove) -> bool {
+        let side_index = if self.is_white_turn { 0 } else { 1 };
+        let from_index = mv.from_square.trailing_zeros() as usize;
+        let to_index = mv.to_square.trailing_zeros() as u64;
+        println!("from_index: {}, to_index: {}", from_index, to_index);
+        if let Some(path_mask) = self.rook_paths[from_index].get(&to_index) {
+            println!("checking rook move with path mask: {:x}", path_mask);
+            let all_pieces = self.occupancy[0] | self.occupancy[1];
+            // if (path_mask & (all_pieces & !mv.to_square)) != 0 {
+            // path mask does not containt the source and target of the rook move
+            // so the next check should be ok
+            if (path_mask & all_pieces) != 0 {
+                return false;
+            }
+            if (mv.to_square & self.occupancy[side_index]) != 0 {
+                return false;
+            }
+            return true;
+        }
         false
     }
+
     fn is_queen_move_possible(&self, mv: ChessMove) -> bool {
         false
     }
@@ -208,6 +247,29 @@ impl Chess {
     fn gen_rook_moves(&mut self, is_white: bool) {}
     fn gen_queen_moves(&mut self, is_white: bool) {}
     fn gen_king_moves(&mut self, is_white: bool) {}
+
+    fn precompute_rook_paths(&mut self) {
+        for i in 0..64 {
+            let to_i0: u64 = i % 8;
+            let to_j0: u64 = i / 8;
+            for k in 0..8 {
+                let to_hor = k + to_j0 * 8;
+                let to_ver = to_i0 + k * 8;
+                if to_hor != i {
+                    let mini = to_i0.min(k);
+                    let maxi = to_i0.max(k);
+                    let to_hor_path = (mini + 1..maxi).fold(0, |a, b| a | (1 << (b + to_j0 * 8)));
+                    self.rook_paths[i as usize].insert(to_hor, to_hor_path);
+                }
+                if to_ver != i {
+                    let minj = to_j0.min(k);
+                    let maxj = to_j0.max(k);
+                    let to_ver_path = (minj + 1..maxj).fold(0, |a, b| a | (1 << (to_i0 + b * 8)));
+                    self.rook_paths[i as usize].insert(to_ver, to_ver_path);
+                }
+            }
+        }
+    }
 
     fn draw_board(&mut self, canvas: &mut graphics::Canvas) {
         for i in 0..8 {
@@ -315,7 +377,9 @@ impl Chess {
         let brook_bitmask = 1u64 << 56 | 1u64 << 63;
         let bqueen_bitmask = 1u64 << 60;
         let bking_bitmask = 1u64 << 59;
+        let empty_rook_paths: [HashMap<u64, u64>; 64] = std::array::from_fn(|_| HashMap::new());
         let mut chess = Chess {
+            rook_paths: empty_rook_paths,
             occupancy: [
                 wpawn_bitmask
                     | wknight_bitmask
@@ -375,6 +439,7 @@ impl Chess {
             )
             .expect("Could not make the rectangle"),
         };
+        chess.precompute_rook_paths();
         chess.update_possible_moves();
         return chess;
     }

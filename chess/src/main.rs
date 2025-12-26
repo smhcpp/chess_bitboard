@@ -28,11 +28,15 @@ fn main() {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChessMove {
     from_square: u64,
-    moves: u64,
+    to_square: u64,
 }
 
 struct Chess {
-    possible_moves: Vec<ChessMove>,
+    // possible_moves: Vec<ChessMove>,
+    possible_moves: [u64; 12],
+    white_occupancy: u64,
+    black_occupancy: u64,
+    all_occupancy: u64,
     is_white_turn: bool,
     mouse_position: [f32; 2],
     from_square: u64,
@@ -47,13 +51,19 @@ struct Chess {
 }
 
 impl Chess {
+    pub const NOT_A_FILE: u64 = 0x7f7f7f7f7f7f7f7f;
+    pub const NOT_B_FILE: u64 = 0xbfbfbfbfbfbfbfbf;
+    pub const NOT_G_FILE: u64 = 0xfdfdfdfdfdfdfdfd;
+    pub const NOT_H_FILE: u64 = 0xfefefefefefefefe;
+    pub const NOT_AB_FILE: u64 = Self::NOT_A_FILE & Self::NOT_B_FILE;
+    pub const NOT_GH_FILE: u64 = Self::NOT_G_FILE & Self::NOT_H_FILE;
     fn make_move(&mut self) {
         if self.from_square == 0 || self.to_square == 0 || self.from_square == self.to_square {
             return;
         }
         if !self.is_move_possible(ChessMove {
             from_square: self.from_square,
-            moves: self.to_square,
+            to_square: self.to_square,
         }) {
             return;
         }
@@ -68,32 +78,115 @@ impl Chess {
                 self.bitboards[i] |= self.to_square;
             }
         }
+        self.white_occupancy = self.bitboards[0]
+            | self.bitboards[1]
+            | self.bitboards[2]
+            | self.bitboards[3]
+            | self.bitboards[4]
+            | self.bitboards[5];
+        self.black_occupancy = self.bitboards[6]
+            | self.bitboards[7]
+            | self.bitboards[8]
+            | self.bitboards[9]
+            | self.bitboards[10]
+            | self.bitboards[11];
+        self.all_occupancy = self.white_occupancy | self.black_occupancy;
+
         self.is_white_turn = !self.is_white_turn;
         self.update_possible_moves();
     }
 
     fn is_move_possible(&self, mv: ChessMove) -> bool {
-        for possible_move in &self.possible_moves {
-            if possible_move.from_square == mv.from_square && possible_move.moves & mv.moves != 0 {
-                return true;
+        for piece_index in 0..self.bitboards.len() {
+            if self.bitboards[piece_index] & mv.from_square != 0 {
+                match piece_index % 6 {
+                    0 => self.is_pawn_move_possible(mv),
+                    1 => self.is_knight_move_possible(mv),
+                    2 => self.is_bishop_move_possible(mv),
+                    3 => self.is_rook_move_possible(mv),
+                    4 => self.is_queen_move_possible(mv),
+                    5 => self.is_king_move_possible(mv),
+                    _ => false,
+                };
             }
         }
         false
     }
 
+    fn is_pawn_move_possible(&self, mv: ChessMove) -> bool {
+        let single_move = if self.is_white_turn {
+            mv.from_square << 8
+        } else {
+            mv.from_square >> 8
+        };
+        let double_move = if self.is_white_turn {
+            mv.from_square << 16
+        } else {
+            mv.from_square >> 16
+        };
+        let take_right = if self.is_white_turn {
+            mv.from_square << 7
+        } else {
+            mv.from_square >> 9
+        };
+        let take_left = if self.is_white_turn {
+            mv.from_square << 9
+        } else {
+            mv.from_square >> 7
+        };
+        let possibilities = single_move | double_move | take_right | take_left;
+        return possibilities
+            & mv.to_square
+            & self.possible_moves[if self.is_white_turn { 0 } else { 6 }]
+            != 0;
+    }
+    fn is_knight_move_possible(&self, mv: ChessMove) -> bool {
+        let side_index = if self.is_white_turn { 1 } else { 7 };
+        let moves: u64 = ((mv.from_square << 6) & Self::NOT_AB_FILE)
+            | ((mv.from_square << 10) & Self::NOT_GH_FILE)
+            | ((mv.from_square << 15) & Self::NOT_A_FILE)
+            | ((mv.from_square << 17) & Self::NOT_H_FILE)
+            | ((mv.from_square >> 6) & Self::NOT_GH_FILE)
+            | ((mv.from_square >> 10) & Self::NOT_AB_FILE)
+            | ((mv.from_square >> 15) & Self::NOT_A_FILE)
+            | ((mv.from_square >> 17) & Self::NOT_H_FILE);
+        return moves & mv.to_square & self.possible_moves[side_index] != 0;
+    }
+    fn is_bishop_move_possible(&self, mv: ChessMove) -> bool {
+        false
+    }
+    fn is_rook_move_possible(&self, mv: ChessMove) -> bool {
+        false
+    }
+    fn is_queen_move_possible(&self, mv: ChessMove) -> bool {
+        false
+    }
+    fn is_king_move_possible(&self, mv: ChessMove) -> bool {
+        false
+    }
+
     fn update_possible_moves(&mut self) {
-        self.possible_moves.clear();
+        self.gen_pawn_moves(self.is_white_turn);
+        self.gen_knight_moves(self.is_white_turn);
+        self.gen_bishop_moves(self.is_white_turn);
+        self.gen_rook_moves(self.is_white_turn);
+        self.gen_queen_moves(self.is_white_turn);
+        self.gen_king_moves(self.is_white_turn);
+    }
+
+    fn update_possiblee_moves(&mut self) {
+        // self.possible_moves.clear();
         for piece_index in 0..self.bitboards.len() {
             let mut temp = self.bitboards[piece_index];
             while temp != 0 {
                 let one_index = temp.trailing_zeros();
                 match piece_index % 6 {
-                    0 => self.gen_pawn_moves(piece_index, one_index),
-                    1 => self.gen_knight_moves(one_index),
-                    2 => self.gen_bishop_moves(one_index),
-                    3 => self.gen_rook_moves(one_index),
-                    4 => self.gen_queen_moves(one_index),
-                    5 => self.gen_king_moves(one_index),
+                    // 0 => self.gen_pawn_moves(piece_index, one_index),
+                    // 1 => self.gen_knight_moves(one_index),
+                    // 2 => self.gen_bishop_moves(one_index),
+                    // 3 => self.gen_rook_moves(one_index),
+                    // 4 => self.gen_queen_moves(one_index),
+                    // 5 => self.gen_king_moves(one_index),
                     _ => {}
                 }
                 temp &= temp - 1;
@@ -101,7 +194,43 @@ impl Chess {
         }
     }
 
-    fn gen_pawn_moves(&mut self, piece_index: usize, one_index: u32) {
+    fn gen_pawn_moves(&mut self, is_white: bool) {
+        let mut moves: u64 = 0;
+        let side_index: usize = if is_white { 0 } else { 1 };
+        let empty_squares = !self.all_occupancy;
+        let enemy_squares = if self.is_white_turn {
+            self.black_occupancy
+        } else {
+            self.white_occupancy
+        };
+        let single_push = if self.is_white_turn {
+            self.bitboards[side_index] << 8
+        } else {
+            self.bitboards[side_index] >> 8
+        };
+        let double_push = if self.is_white_turn {
+            self.bitboards[side_index] << 16
+        } else {
+            self.bitboards[side_index] >> 16
+        };
+        let take_right = if self.is_white_turn {
+            self.bitboards[side_index] << 9
+        } else {
+            self.bitboards[side_index] >> 7
+        };
+        let take_left = if self.is_white_turn {
+            self.bitboards[side_index] << 7
+        } else {
+            self.bitboards[side_index] >> 9
+        };
+        moves |= empty_squares & single_push;
+        moves |= empty_squares & double_push;
+        moves |= enemy_squares & take_right & Self::NOT_H_FILE;
+        moves |= enemy_squares & take_left & Self::NOT_A_FILE;
+        self.possible_moves[side_index] = moves;
+    }
+
+    fn gen_pawn_moves2(&mut self, piece_index: usize, one_index: u32) {
         let location_mask: u64 = 1 << one_index;
         let is_white = piece_index < 6;
         let mut moves: u64 = 0;
@@ -162,41 +291,28 @@ impl Chess {
             return;
         }
         // ADD ENPASSANT
-        self.possible_moves.push(ChessMove {
-            from_square: location_mask,
-            moves: moves,
-        });
+        // CHECK If A or H FILES FOR TAKING MOVES AND ENPASSANT
+        // self.possible_moves.push(ChessMove {
+        //     from_square: location_mask,
+        //     moves: moves,
+        // });
     }
 
-    fn gen_knight_moves(&mut self, one_index: u32) {
-        let location_mask: u64 = 1 << one_index;
-        let mut moves: u64 = 0;
-        let not_a_file: u64 = 0x7f7f7f7f7f7f7f7f;
-        let not_b_file: u64 = 0xbfbfbfbfbfbfbfbf;
-        let not_g_file: u64 = 0xfdfdfdfdfdfdfdfd;
-        let not_h_file: u64 = 0xfefefefefefefefe;
-        let not_ab_file = not_a_file & not_b_file;
-        let not_gh_file = not_g_file & not_h_file;
-        moves |= (location_mask << 6) & not_ab_file;
-        moves |= (location_mask << 10) & not_gh_file;
-        moves |= (location_mask << 15) & not_a_file;
-        moves |= (location_mask << 17) & not_h_file;
-        moves |= (location_mask >> 6) & not_gh_file;
-        moves |= (location_mask >> 10) & not_ab_file;
-        moves |= (location_mask >> 15) & not_a_file;
-        moves |= (location_mask >> 17) & not_h_file;
-        if moves == 0 {
-            return;
-        }
-        self.possible_moves.push(ChessMove {
-            from_square: location_mask,
-            moves: moves,
-        });
+    fn gen_knight_moves(&mut self, is_white: bool) {
+        let side_index = if is_white { 1 } else { 7 };
+        self.possible_moves[side_index] = ((self.bitboards[side_index] << 6) & Self::NOT_AB_FILE)
+            | ((self.bitboards[side_index] << 10) & Self::NOT_GH_FILE)
+            | ((self.bitboards[side_index] << 15) & Self::NOT_A_FILE)
+            | ((self.bitboards[side_index] << 17) & Self::NOT_H_FILE)
+            | ((self.bitboards[side_index] >> 6) & Self::NOT_GH_FILE)
+            | ((self.bitboards[side_index] >> 10) & Self::NOT_AB_FILE)
+            | ((self.bitboards[side_index] >> 15) & Self::NOT_A_FILE)
+            | ((self.bitboards[side_index] >> 17) & Self::NOT_H_FILE);
     }
-    fn gen_bishop_moves(&mut self, one_index: u32) {}
-    fn gen_rook_moves(&mut self, one_index: u32) {}
-    fn gen_queen_moves(&mut self, one_index: u32) {}
-    fn gen_king_moves(&mut self, one_index: u32) {}
+    fn gen_bishop_moves(&mut self, is_white: bool) {}
+    fn gen_rook_moves(&mut self, is_white: bool) {}
+    fn gen_queen_moves(&mut self, is_white: bool) {}
+    fn gen_king_moves(&mut self, is_white: bool) {}
 
     fn draw_board(&mut self, canvas: &mut graphics::Canvas) {
         for i in 0..8 {
@@ -305,7 +421,20 @@ impl Chess {
         let bqueen_bitmask = 1u64 << 60;
         let bking_bitmask = 1u64 << 59;
         let mut chess = Chess {
-            possible_moves: Vec::new(),
+            white_occupancy: wpawn_bitmask
+                | wknight_bitmask
+                | wbishop_bitmask
+                | wrook_bitmask
+                | wqueen_bitmask
+                | wking_bitmask,
+            black_occupancy: bpawn_bitmask
+                | bknight_bitmask
+                | bbishop_bitmask
+                | brook_bitmask
+                | bqueen_bitmask
+                | bking_bitmask,
+            all_occupancy: 0,
+            possible_moves: [0; 12],
             is_white_turn: true,
             mouse_position: [0.0, 0.0],
             from_square: 0,
@@ -350,6 +479,7 @@ impl Chess {
             )
             .expect("Could not make the rectangle"),
         };
+        chess.all_occupancy = chess.white_occupancy | chess.black_occupancy;
         chess.update_possible_moves();
         return chess;
     }

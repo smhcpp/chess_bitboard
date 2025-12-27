@@ -156,15 +156,20 @@ impl Chess {
 
     fn is_knight_move_possible(&self, mv: ChessMove) -> bool {
         let side_index = if self.is_white_turn { 0 } else { 1 };
-        let moves: u64 = ((mv.from_square << 6) & Self::NOT_AB_FILE)
-            | ((mv.from_square << 10) & Self::NOT_GH_FILE)
-            | ((mv.from_square << 15) & Self::NOT_A_FILE)
-            | ((mv.from_square << 17) & Self::NOT_H_FILE)
-            | ((mv.from_square >> 6) & Self::NOT_GH_FILE)
-            | ((mv.from_square >> 10) & Self::NOT_AB_FILE)
-            | ((mv.from_square >> 15) & Self::NOT_A_FILE)
-            | ((mv.from_square >> 17) & Self::NOT_H_FILE);
-        return moves & mv.to_square & !self.occupancy[side_index] != 0;
+        let mut moves: u64 = 0;
+        if (mv.from_square & Self::NOT_AB_FILE) != 0 {
+            moves |= (mv.from_square << 10) | (mv.from_square >> 6);
+        }
+        if (mv.from_square & Self::NOT_GH_FILE) != 0 {
+            moves |= (mv.from_square << 6) | (mv.from_square >> 10);
+        }
+        if (mv.from_square & Self::NOT_A_FILE) != 0 {
+            moves |= (mv.from_square << 17) | (mv.from_square >> 15);
+        }
+        if (mv.from_square & Self::NOT_H_FILE) != 0 {
+            moves |= (mv.from_square << 15) | (mv.from_square >> 17);
+        }
+        return (moves & mv.to_square) != 0 && (mv.to_square & self.occupancy[side_index]) == 0;
     }
 
     fn is_bishop_move_possible(&self, mv: ChessMove) -> bool {

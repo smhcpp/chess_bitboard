@@ -5,6 +5,7 @@ use ggez::graphics::{self, Color};
 use ggez::winit::window::CursorIcon;
 use ggez::{Context, ContextBuilder, GameResult};
 use std::collections::HashMap;
+
 fn main() {
     let width: f32 = 640.0;
     let height: f32 = 640.0;
@@ -59,6 +60,7 @@ pub struct ChessMove {
 }
 
 struct Chess {
+    bishop_paths: [HashMap<u64, u64>; 64],
     rook_paths: [HashMap<u64, u64>; 64],
     possible_moves: [u64; 12],
     occupancy: [u64; 2],
@@ -164,7 +166,21 @@ impl Chess {
             | ((mv.from_square >> 17) & Self::NOT_H_FILE);
         return moves & mv.to_square & !self.occupancy[side_index] != 0;
     }
+
     fn is_bishop_move_possible(&self, mv: ChessMove) -> bool {
+        let side_index = if self.is_white_turn { 0 } else { 1 };
+        let from_index = mv.from_square.trailing_zeros() as usize;
+        let to_index = mv.to_square.trailing_zeros() as u64;
+        if let Some(path_mask) = self.bishop_paths[from_index].get(&to_index) {
+            let all_pieces = self.occupancy[0] | self.occupancy[1];
+            if (path_mask & all_pieces) != 0 {
+                return false;
+            }
+            if (mv.to_square & self.occupancy[side_index]) != 0 {
+                return false;
+            }
+            return true;
+        }
         false
     }
 
@@ -172,9 +188,7 @@ impl Chess {
         let side_index = if self.is_white_turn { 0 } else { 1 };
         let from_index = mv.from_square.trailing_zeros() as usize;
         let to_index = mv.to_square.trailing_zeros() as u64;
-        println!("from_index: {}, to_index: {}", from_index, to_index);
         if let Some(path_mask) = self.rook_paths[from_index].get(&to_index) {
-            println!("checking rook move with path mask: {:x}", path_mask);
             let all_pieces = self.occupancy[0] | self.occupancy[1];
             // if (path_mask & (all_pieces & !mv.to_square)) != 0 {
             // path mask does not containt the source and target of the rook move
@@ -191,8 +205,9 @@ impl Chess {
     }
 
     fn is_queen_move_possible(&self, mv: ChessMove) -> bool {
-        false
+        return self.is_bishop_move_possible(mv) || self.is_rook_move_possible(mv);
     }
+
     fn is_king_move_possible(&self, mv: ChessMove) -> bool {
         false
     }
@@ -247,6 +262,33 @@ impl Chess {
     fn gen_rook_moves(&mut self, is_white: bool) {}
     fn gen_queen_moves(&mut self, is_white: bool) {}
     fn gen_king_moves(&mut self, is_white: bool) {}
+
+    fn precompute_bishop_paths(&mut self) {
+        for i in 0..64 {
+            let start_x = (i % 8) as i8;
+            let start_y = (i / 8) as i8;
+            for t in 0..64 {
+                if i == t {
+                    continue;
+                }
+                let target_x = (t % 8) as i8;
+                let target_y = (t / 8) as i8;
+                let dx = target_x - start_x;
+                let dy = target_y - start_y;
+                if dx.abs() == dy.abs() {
+                    let steps = dx.abs();
+                    let step_x = dx.signum();
+                    let step_y = dy.signum();
+                    let jump_index = step_y * 8 + step_x;
+                    let path = (1..steps).fold(0, |acc, k| {
+                        let square_idx = (i as i8 + k as i8 * jump_index) as u64;
+                        acc | (1u64 << square_idx)
+                    });
+                    self.bishop_paths[i as usize].insert(t, path);
+                }
+            }
+        }
+    }
 
     fn precompute_rook_paths(&mut self) {
         for i in 0..64 {
@@ -378,7 +420,9 @@ impl Chess {
         let bqueen_bitmask = 1u64 << 60;
         let bking_bitmask = 1u64 << 59;
         let empty_rook_paths: [HashMap<u64, u64>; 64] = std::array::from_fn(|_| HashMap::new());
+        let empty_bishop_paths: [HashMap<u64, u64>; 64] = std::array::from_fn(|_| HashMap::new());
         let mut chess = Chess {
+            bishop_paths: empty_bishop_paths,
             rook_paths: empty_rook_paths,
             occupancy: [
                 wpawn_bitmask
@@ -439,6 +483,7 @@ impl Chess {
             )
             .expect("Could not make the rectangle"),
         };
+        chess.precompute_bishop_paths();
         chess.precompute_rook_paths();
         chess.update_possible_moves();
         return chess;
